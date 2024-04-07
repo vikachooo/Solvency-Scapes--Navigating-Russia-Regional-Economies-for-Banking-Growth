@@ -1,0 +1,1261 @@
+---
+title: "Russian Economy in 2020"
+author: "Victoria Zaitceva"
+date: "2024-04-02"
+output: 
+    html_document:
+      theme: cerulean
+      toc: true
+      toc_float: true
+runtime: shiny
+---
+
+```{r setup, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+library(tidyverse)
+library(psych)
+library(stargazer)
+library(lmtest)
+library(sandwich)
+library(pROC)
+library(caret)
+library(shiny)
+library(leaflet)
+library(viridis)
+setwd("/Users/viktoriazajceva/Desktop/R/20 Проект/FINAL/shiny indicators")
+```
+
+
+
+```{r load, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+data <- read.csv("All_data_eng.csv", stringsAsFactors = FALSE)  # Read data without converting strings to factors
+
+data <- data[, -1] 
+
+```
+
+
+![](im1.jpeg)
+
+
+
+![](im2.jpeg)
+
+
+```{r distrubution check, warning=FALSE, message=FALSE, echo=FALSE, results='hide', fig.show='hide'}
+par(oma = c(0, 0, 0, 0))
+# безналичные платежи
+describe(data$transactions)
+hist(data$transactions) #распределение не нормальное
+
+# месячная активность
+describe(data$activity)
+hist(data$activity) #распределение примерно нормальное
+
+# внутренний туризм
+describe(data$tourism) #распределение примерно нормальное
+hist(data$tourism)
+```
+
+
+```{r 2.SberIndex dynamics 2020, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+##### tourism ##### 
+t_descr <- describeBy(data$tourism, group = data$Month)
+
+month_order1 <- c("January", "February","March", "April", "May", "June", "July", "August","September", "October","November", "December")
+
+t_descr <- t_descr[month_order1]
+
+# 3rd element from each sublist
+tourist_means <- c()
+
+mean_function <- function(list, vector) {
+  for (sublist in list) {
+    vector <- c(vector, sublist[[3]])
+  }
+  return(vector)
+}
+
+tourist_means <- mean_function(t_descr, tourist_means)
+
+
+##### monthly activity ##### 
+
+activ_descr <- describeBy(data$activity, group = data$Month)
+activ_descr <- activ_descr[month_order1]
+
+
+activity_means <- c()
+activity_means <- mean_function(activ_descr, activity_means)
+
+
+#####  transactions ##### 
+
+trans_descr <- describeBy(data$transactions, group = data$Month)
+trans_descr <- trans_descr[month_order1]
+
+transaction_means <- c()
+transaction_means <- mean_function(trans_descr, transaction_means)
+
+sber_means <- cbind.data.frame(activity_means, transaction_means, tourist_means)
+
+sber_means$month <- c("January", "February","March", "April", "May", "June", "July", "August","September", "October","November", "December")
+
+# Reshape the data into long format
+sber_means_long <- pivot_longer(sber_means, 
+                                cols = c(activity_means, transaction_means, tourist_means), 
+                                names_to = "Metric", 
+                                values_to = "Value")
+
+# order for ggplot
+sber_means_long$month <- factor(sber_means_long$month, levels = month_order1)
+
+```
+
+
+
+### General Trends in the Russian Economy in 2020 
+
+***Consumer Activity Trends:***
+
+-There was a discernible surge in consumer activity during the latter half of the year, reaching its peak in September.
+
+-Conversely, April recorded the nadir of consumer activity, marking the lowest point in the year.
+
+***Online Payment Dynamics:***
+
+-Throughout 2020, the share of online payments in trade turnover demonstrated remarkable stability, maintaining a consistent 50% proportion across all months.
+
+-This steadiness suggests a persistent reliance on online transactions amidst varying economic conditions and consumer behaviors.
+
+***Impact of COVID-19 Restrictions on Tourism:***
+
+-Analysis of domestic tourism trends in comparison to the preceding year (2019) unveiled a stark contrast, particularly evident during the spring holiday period of April and May. Notably, there was a significant decline, with the number of domestic tourists decreasing to half of the previous year's figures.
+
+-The decline can be attributed to the stringent anti-COVID measures in place across most regions, hindering mass tourism activities during this period.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+ggplot(sber_means_long, aes(x = month, y = Value, color = Metric, group = Metric)) +
+  geom_line() +
+  labs(x = "", y = "", 
+       title = "Dynamics of SberIndex indicators in 2020 by month",
+       color = "") + #название легенды
+scale_color_manual(values = c("activity_means" = "darkred", "tourist_means" = "darkgreen", "transaction_means" = "blue"),
+                     labels = c("activity_means" = "Economic activity", "tourist_means" = "Tourism (difference from the last year)", "transaction_means" = "Online transactions (%)")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+        legend.position = "right", 
+        legend.direction = "vertical",
+        legend.justification = "left", 
+        legend.box.just = "left", 
+        plot.title = element_text(size = 10), 
+        legend.text = element_text(size = 6)) 
+
+
+```
+
+
+
+
+```{r 12 box plots, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+
+# Convert Месяц to a factor with custom levels
+data$Month <- factor(data$Month, levels = month_order1)
+
+
+ggplot(data, aes(x = Month)) +
+  geom_boxplot(aes(y = activity, x = "Активность (слева)", fill = "Активность (слева)"), outlier.color = "mediumpurple1", outlier.size = 1) +
+  geom_boxplot(aes(y = tourism, x = "Туризм (справа)", fill = "Туризм (справа)"), outlier.color = "seagreen1", outlier.size = 1) +
+  geom_boxplot(aes(y = transactions, x = "БП (центр)", fill = "БП (центр)"), outlier.color = "pink", outlier.size = 1) +
+  facet_wrap(~ Month, scales = "free_x", ncol = 4) +
+  labs(x = "", y = "", title = "SberIndex indicators by month in 2020") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "bottom",
+    strip.background = element_rect(fill = "gray88")
+  ) +
+  scale_fill_manual(values = c("Активность (слева)" = "mediumpurple1", "Туризм (справа)" = "seagreen1", "БП (центр)" = "pink"), name = "",
+  labels = c("Активность (слева)" = "Economic activity (left)", "Туризм (справа)" = "Tourism (right)", "БП (центр)" = "Online transactions (center)"))
+
+
+
+```
+
+
+
+
+
+```{r 4.outliers, warning=FALSE, message=FALSE, echo=FALSE, results='hide', fig.show='hide'}
+
+##### 4.Нетипичные наблюдения ##### 
+#
+bp <- boxplot(data$transactions ~ data$Month, cex.labels = 0.2)
+bp
+outliers_bp <- bp$out
+
+bp_outlier_indices <- which(data$transactions %in% outliers_bp)
+bp_outlier_indices
+
+bp_outliers_data <- data[bp_outlier_indices, ]
+bp_outliers_data #самые низкие индексы безналичных платежелй в Чечне, Северной осетии, Ингушении, Дагестане, КБР
+# самые высокие в Ненецком АО
+
+
+#
+act <- boxplot(data$activity ~ data$Month, cex.labels = 0.2)
+act
+outliers_act <- act$out
+
+act_outlier_indices <- which(data$activity %in% outliers_act)
+act_outlier_indices
+
+act_outliers_data <- data[act_outlier_indices, ]
+act_outliers_data # Не вижу очевидных объяснений
+
+# для туризма не делаю
+```
+
+
+
+
+### Top Regions
+
+![](im3.jpeg)
+
+
+
+```{r 5.top-30 regions, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+# Activity
+activity_by_reg <- describeBy(data$activity, group = data$Region)
+activity_by_reg
+
+# 3rd element (e.g. mean) from each sublist
+
+act_mean_by_reg <- data.frame()
+
+mean_function_dataframe <- function(list, dataframe) {
+  for (sublist in list) {
+    mean_value <- sublist[[3]]
+    dataframe <- rbind(dataframe, mean_value)
+  }
+  return(dataframe)
+}
+
+act_mean_by_reg <- mean_function_dataframe(activity_by_reg, act_mean_by_reg)
+act_mean_by_reg
+act_mean_by_reg$Region <- sort(unique(data$Region)) # describeBy дает список сортированный по алфавиту
+
+colnames(act_mean_by_reg)[1] <- "activity"
+act_mean_by_reg <- act_mean_by_reg %>% arrange(desc(activity))
+top30_activity <- head(act_mean_by_reg, 30)
+
+##### transactions ##### 
+
+bp_by_reg <- describeBy(data$transactions, group = data$Region)
+bp_by_reg
+bp_mean_by_reg <- data.frame()
+
+mean_function_dataframe <- function(list, dataframe) {
+  for (sublist in list) {
+    mean_value <- sublist[[3]]
+    dataframe <- rbind(dataframe, mean_value)
+  }
+  return(dataframe)
+}
+
+bp_mean_by_reg <- mean_function_dataframe(bp_by_reg, bp_mean_by_reg)
+
+
+bp_mean_by_reg$Region <- sort(unique(data$Region))
+
+colnames(bp_mean_by_reg)[1] <- "transactions"
+bp_mean_by_reg <- bp_mean_by_reg %>% arrange(desc(transactions))
+top30_bp <- head(bp_mean_by_reg, 30)
+# (конкретно с bp можно только один раз прогнать код, потом нужно удалить bp_mean_by_reg, чтобы не было дублирования)
+
+##### 7. regions in both top-30 (activity and transactions)
+
+common_top <- intersect(top30_bp$Region, top30_activity$Region)
+
+# 13
+# "Камчатский Край"         "Тюменская Область"       "Томская Область"         "Калининградская Область"
+# "Кировская Область"       "Хабаровский Край"        "Удмуртская Республика"   "Свердловская Область"   
+# "Москва"                  "Иркутская Область"       "Нижегородская Область"   "Кемеровская Область"    
+# "Республика Башкортостан"
+
+##### 8. Выберите строки, соответствующие регионам из предыдущего пункта, и сохраните их в отдельный датафрейм. #####
+
+common_rows <- top30_activity$Region %in% common_top
+common_rows
+subset_top30_activity <- top30_activity[common_rows, ]
+subset_top30_activity
+
+common_rows2 <- top30_bp$Region %in% common_top
+subset_top30_bp <- top30_bp[common_rows2, ]
+subset_top30_bp
+
+top_activ_and_bp <- full_join(subset_top30_activity, subset_top30_bp, by = "Region")
+
+top_activ_and_bp <- top_activ_and_bp[ , c("Region", "activity", "transactions")]
+top_activ_and_bp <- top_activ_and_bp %>% arrange(Region)
+
+
+# подсчет средних индексов туризма, не нужно делать
+tour_by_reg <- describeBy(data$tourism, group = data$Region)
+tour_by_reg
+tour_mean_by_reg <- data.frame()
+
+mean_function_dataframe <- function(list, dataframe) {
+  for (sublist in list) {
+    mean_value <- sublist[[3]]
+    dataframe <- rbind(dataframe, mean_value)
+  }
+  return(dataframe)
+}
+
+tour_mean_by_reg <- mean_function_dataframe(tour_by_reg, tour_mean_by_reg)
+tour_mean_by_reg
+
+tour_mean_by_reg$Region <- sort(unique(data$Region))
+
+colnames(tour_mean_by_reg)[1] <- "tourism"
+
+common_rows3 <- tour_mean_by_reg$Region %in% common_top
+common_rows3
+subset_tourism <- tour_mean_by_reg[common_rows3, ]
+subset_tourism # средниие за год индексы туризма в регионах, 
+# которые одновременно лидируют по потребительской активности и доле безналичных платежей
+
+
+##### 9. Регионы с индексом туризма выше нуля в 5 месяцах и более ##### 
+
+# Определите, в каких регионах среди отобранных на предыдущих шагах, индекс
+# внутреннего туризма принимал значения выше 0 не менее чем в течение 5
+# месяцев (не обязательно подряд). 
+
+sum(data$tourism>0, na.rm = TRUE) # все случаи когда туризм > 0, na.rm = TRUE т.к. видимо есть пропущенные значения
+# is the result >= 5 ? - check for each region
+
+counts_greater_than_zero_by_group <- aggregate(data$tourism > 0 ~ Region, data = data, FUN = sum, na.rm = TRUE)
+counts_greater_than_zero_by_group
+
+reg_with_tour_above_zero <- data.frame()
+
+# Loop through each row of counts_greater_than_zero_by_group
+for (i in seq_len(nrow(counts_greater_than_zero_by_group))) {
+  count_value <- counts_greater_than_zero_by_group[i, 2]
+  
+  if (count_value >= 5) {
+    reg_with_tour_above_zero <- rbind(reg_with_tour_above_zero, counts_greater_than_zero_by_group[i, ])
+  }
+}
+
+reg_with_tour_above_zero #48 регионов, где индекс туризма был выше нуля 5 и более раз
+
+##### 10. Регионы, которые одновременно лидируют по потребительской активности и доле безналичных платежей, и с индексом туризма был выше нуля в 5 раз ##### 
+
+common_rows4 <- reg_with_tour_above_zero$Region %in% common_top
+common_rows4
+top_reg_tourism_above_zero_5t <- reg_with_tour_above_zero[common_rows4, ]
+top_reg_tourism_above_zero_5t
+# из 13 регионов, которые одновременно лидируют по потребительской активности и доле безналичных платежей,
+# только у 4 регионов индекс туризма был выше нуля в 5 месяцах и более за год:
+
+#"Калининградская Область", "Камчатский Край","Кировская Область", "Нижегородская Область" 
+
+# предполагается, что я дальше анализирую данные по месяцам в 4 регионах, полученных в пункте 10?
+
+##### 11. Анализ по месяцам для топовых регионов ##### 
+# теперь нужно в data пройтись для топовых регионов по месяцам
+top_only <- data %>% filter(Region %in% c('Kirov Oblast', 'Kaliningrad Oblast', 'Kamchatka Krai', 'Nizhny Novgorod Oblast'))
+# When filtering rows based on multiple values in a column using filter() from the dplyr package, you should use the %in% operator instead of ==
+
+# месяцы, в которые потребители этих регионов наиболее активны;
+
+median(top_only$activity) #71
+
+top_only %>%
+  filter(activity > 71) %>%
+  arrange(desc(activity)) %>%
+  group_by(Region) %>%
+  summarize(Month_ordered = list(Month)) %>% # list для того чтобы сохранить порядок по убыванию
+  mutate(Month_ordered = sapply(Month_ordered, toString)) # обратно в вектор, через запятую
+
+# 1 Калининградская Область Сентябрь, Август, Июль, Октябрь, Июнь, Февраль, Ноябрь, Март
+# 2 Камчатский Край         Июль, Сентябрь, Октябрь                             
+# 3 Кировская Область       Сентябрь, Июль, Август, Октябрь, Июнь, Февраль     
+# 4 Нижегородская Область   Сентябрь, Октябрь, Март, Июль, Февраль 
+
+
+# месяцы, в которые потребители этих регионов чаще всего совершают безналичные платежи;
+
+median(top_only$transactions) #58.25
+
+top_only %>%
+  filter(transactions > 58.25) %>%
+  arrange(desc(transactions)) %>%
+  group_by(Region) %>%
+  summarize(Month_ordered = list(Month)) %>% # list для того чтобы сохранить порядок по убыванию
+  mutate(Month_ordered = sapply(Month_ordered, toString))
+
+#   Регион                  Месяцы_ordered                                                                    
+# 1 Калининградская Область Ноябрь, Май, Октябрь, Декабрь, Январь, Август, Сентябрь, Март                     
+# 2 Камчатский Край         Ноябрь, Январь, Октябрь, Декабрь, Август, Март, Май, Июнь, Июль, Сентябрь, Февраль
+# 3 Кировская Область       Ноябрь, Январь, Декабрь, Октябрь                                                  
+# 4 Нижегородская Область   Ноябрь 
+
+
+# месяцы, в которые эти регионы чаще всего посещают внутренние туристы.
+
+median(top_only$tourism) # -4.92, но я возьму 0
+
+top_only %>%
+  filter(tourism > 0) %>%
+  arrange(desc(tourism)) %>%
+  group_by(Region) %>%
+  summarize(Month_ordered = list(Month)) %>% # list для того чтобы сохранить порядок по убыванию
+  mutate(Month_ordered = sapply(Month_ordered, toString))
+
+# 1 Калининградская Область Август, Сентябрь, Февраль, Июль, Январь, Октябрь, Ноябрь, Декабрь
+# 2 Камчатский Край         Август, Сентябрь, Декабрь, Март, Февраль                         
+# 3 Кировская Область       Февраль, Сентябрь, Август, Январь, Март                          
+# 4 Нижегородская Область   Февраль, Январь, Март, Август, Сентябрь 
+
+```
+
+
+### Correlation analyses
+
+```{r cor1, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+ 
+# ================== Поиск взаимосвязи ================== 
+
+# 2.3. Корреляция - Индекс безналичных платежей и Индекс внутреннего туризма
+
+correlation_test1 <- cor.test(top_only$transactions,top_only$tourism) #0.032, линейной связи нет
+# но у БП распределение ненормальное, поэтому спирман
+
+correlation_test1
+
+label_text1 <- paste("Correlation:", round(correlation_test1$estimate, 3),
+                    "\nP-value:", format(correlation_test1$p.value, scientific = F, digits = 3))
+
+```
+
+
+
+***No Connection Between Domestic Tourism and Non-Cash Payments:***
+
+The correlation analysis indicates that there is no discernible connection between fluctuations in domestic tourism levels and the prevalence of non-cash payments. This finding suggests that changes in domestic tourism do not significantly impact the share of non-cash transactions.
+
+```{r corr ggplot, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+#================ Поиск взаимосвязей ================
+
+##### 1. Индекс безналичных платежей и Индекс внутреннего туризма ##### 
+
+ggplot(top_only, aes(x = transactions, y = tourism)) +
+  geom_point(color = "blue") +
+  labs(title = "Relationship between domestic tourism and online transactions",
+       x = "Online Transactions Index",
+       y = "Domestic Tourism Index") +
+  theme(plot.title = element_text(size = 10),  # Уменьшаем размер заголовка
+        legend.title = element_text(size = 8), # Уменьшаем размер легенды
+        legend.text = element_text(size = 8),
+        axis.title.x = element_text(size = 8), # размер названия осей
+        axis.title.y = element_text(size = 8),
+        axis.text.x = element_text(size = 8), # размер значений на осях
+        axis.text.y = element_text(size = 8)) +
+   geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dotted", linewidth = 0.7) +
+    geom_text(aes(label = label_text1),
+            x = max(top_only$transactions, na.rm = TRUE),
+            y = min(top_only$tourism, na.rm = TRUE),
+            hjust = 1, vjust = 0)
+  
+
+```
+
+
+
+
+
+```{r cor2, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+cor(top_only$transactions,top_only$tourism, method = "spearman") # 0.0147 нелинейной связи тоже нет
+```
+
+```{r loan and mortgage, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+##### 4. Кредит и ипотека ##### 
+
+unique(top_only$mortgage.deals)
+unique(top_only$loan.applications)
+
+top_only$mortgage.deals[top_only$mortgage.deals == "50 - 100"] <- "50 - 500"
+top_only$mortgage.deals[top_only$mortgage.deals == "100 - 500"] <- "50 - 500"
+
+
+top_only$mortgage.deals <- factor(top_only$mortgage.deals,
+                                          levels = c("50 - 500", "500 - 1 000", "> 1 000"),
+                                          ordered = TRUE)
+
+
+top_only$loan.applications <- factor(top_only$loan.applications,
+                                           levels = c("100 - 500", "500 - 1 000", "1 000 - 5 000"),
+                                           ordered = TRUE)
+
+# For Всего.ипотечных.сделок
+top_only$num_mortgage <- as.numeric(factor(top_only$mortgage.deals, levels = c("50 - 500", "500 - 1 000", "> 1 000")))
+
+# For Всего.одобренных.заявок
+top_only$num_loans <- as.numeric(factor(top_only$loan.applications, levels = c("100 - 500", "500 - 1 000", "1 000 - 5 000")))
+
+```
+
+
+
+***Relationship Between Loan Activity and Mortgage Transactions:***
+
+In regions where residents frequently apply for loans, there exists a notable correlation with higher volumes of mortgage transactions. This relationship demonstrates an average strength, with a correlation coefficient of 0.733. Such findings underscore the interplay between consumer borrowing behaviors and real estate market dynamics.
+
+```{r cor3, warning=FALSE, echo=FALSE, message=FALSE}
+cor.test(as.numeric(top_only$mortgage.deals), as.numeric(top_only$loan.applications), method = "spearman")
+
+# 0.773 - положительная сильная связь
+```
+
+
+***Weak Positive Relationship Between Online Payments and Online Loan Applications:***
+
+The correlation analysis reveals a modest positive relationship between the share of non-cash payments and the number of online loan applications, with a correlation coefficient of 0.366. While the association is weak, it suggests a tendency for increased online loan activity in regions with higher utilisation of non-cash payment methods.
+
+```{r transactions and online applications, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+##### 5. Безналичные платежи и онлайн-заявки на кредит ##### 
+
+correlation_test2 <- cor.test(top_only$transactions, top_only$online.loan.applications.share, method = "spearman")
+correlation_test2
+
+label_text2 <- paste("Correlation:", round(correlation_test2$estimate, 3),
+                    "\nP-value:", format(correlation_test2$p.value, scientific = T, digits = 3))
+# 0.366 положительная слабая связь
+
+```
+
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+ggplot(top_only, aes(x = transactions, y = online.loan.applications.share)) +
+  geom_point(color = "blue") +
+  labs(title = "Relationship between domestic tourism and online transactions",
+       x = "Online Transactions Index",
+       y = "Online loan applications") +
+  theme(plot.title = element_text(size = 10),  # Уменьшаем размер заголовка
+        legend.title = element_text(size = 8), # Уменьшаем размер легенды
+        legend.text = element_text(size = 8),
+        axis.title.x = element_text(size = 8), # размер названия осей
+        axis.title.y = element_text(size = 8),
+        axis.text.x = element_text(size = 8), # размер значений на осях
+        axis.text.y = element_text(size = 8)) +
+   geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dotted", linewidth = 0.7) +
+  geom_text(aes(label = label_text2),
+            x = max(top_only$transactions, na.rm = TRUE),
+            y = min(top_only$online.loan.applications.share, na.rm = TRUE),
+            hjust = 1, vjust = 0)
+```
+
+
+
+
+
+```{r 7.add season, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+top_only <- top_only %>%
+  mutate(Season = case_when(
+    Month %in% c("January", "February", "December") ~ "Winter",
+    Month %in% c("April", "May", "March") ~ "Spring",
+    Month %in% c("June", "July", "August") ~ "Summer",
+    Month %in% c("September", "October", "November") ~ "Autumn"
+  ))
+
+```
+
+
+
+```{r 8.mortgage deals by season, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+# возвращаю исходный датафрейм, так как меняла ипотеку для корреляции
+top_only <- data %>% filter(Region %in% c("Kirov Oblast", "Kaliningrad Oblast", "Kamchatka Krai" , "Nizhny Novgorod Oblast"))
+
+# добавить сезон
+top_only <- top_only %>%
+  mutate(Season = case_when(
+    Month %in% c("January", "February", "December") ~ "Winter",
+    Month %in% c("April", "May", "March") ~ "Spring",
+    Month %in% c("June", "July", "August") ~ "Summer",
+    Month %in% c("September", "October", "November") ~ "Autumn"
+  ))
+# столбиковую диаграмму, которая бы иллюстрировала соотношение
+# количества ипотечных сделок, заключённых в разное время года, для каждой
+# категории числа ипотечных сделок (10–50, 50–100, 100–500, 500–1000, больше 1000).
+
+unique(top_only$mortgage.deals) # нет 10-50 категории
+
+# фактор для упорядочивания столбцов
+
+top_only <- top_only %>% 
+  mutate(mortgage.deals = factor(mortgage.deals, 
+                      levels = c("50 - 100", "100 - 500", "500 - 1 000", "> 1 000"),
+                      ordered = TRUE))
+
+top_only <- top_only %>% 
+  mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Autumn"),
+                         ordered = TRUE))
+```
+
+
+The largest number of mortgage transactions (in total) in the most economically active regions occurs in the autumn.
+
+```{r 8. mortgage deals by season, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+ggplot(top_only, aes(x = mortgage.deals, fill = Season)) + geom_bar() +
+  facet_wrap(~Season) +
+  scale_fill_manual(values = c("Spring" = "lightpink", "Summer" = "chartreuse3", "Autumn" = "darkorange", "Winter" = "lightsteelblue1")) +
+  labs(title = "Number of mortgage transactions at different times of the year",
+       y = "",
+       x = "",
+       fill = "Season") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8),
+        plot.title = element_text(size = 10),  # Уменьшаем размер заголовка
+        legend.title = element_text(size = 8), # Уменьшаем размер легенды
+        legend.text = element_text(size = 8))
+
+
+# больше всего сделок заключается осенью
+
+top_only %>% group_by(Season) %>% count(mortgage.deals)
+
+```
+
+
+***Insights from Correlation Analysis***
+
+The correlation analysis conducted reveals a significant association between the frequency of loan applications by residents and the volume of mortgage transactions in various regions, characterized by a moderate strength of connection, with a Spearman correlation coefficient of 0.733. This suggests that regions with higher loan application rates also experience elevated levels of mortgage activity.
+
+***Seasonal Trends in Mortgage Transactions and Loan Applications***
+
+Echoing the observation of increased mortgage activity during autumn, the analysis indicates a similar trend in online loan applications. The lending activity during autumn can be attributed to several factors.
+
+***Autumnal Surge in Lending Activity***
+
+The surge in lending during the fall may be attributed to the post-summer holiday period and the pre-New Year phase, which often serves as an opportune time for individuals to make substantial financial decisions. Additionally, in the context of 2020, the relaxation of most anti-COVID measures by autumn might have alleviated decision-making barriers for individuals, facilitating increased financial activity.
+
+***Spring Dynamics in Online Applications***
+
+Conversely, the considerable variation in online loan applications observed across regions during spring can be attributed to the repercussions of COVID-19 restrictions. The introduction of stringent measures in March prompted individuals to defer loan applications due to heightened uncertainty. Those who did proceed with loan applications tended to favor online channels, given the closure of many physical bank branches.
+
+
+
+```{r 9-10. online applications by season, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+##### 9.10. Онлайн-заявки на ипотеку в разное время года ##### 
+
+ggplot(top_only, aes(x = Season, y = online.loan.applications.share, fill = Season)) + 
+  geom_boxplot() +
+  scale_fill_manual(values = c("Spring" = "lightpink", "Summer" = "chartreuse3", "Autumn" = "darkorange", "Winter" = "lightsteelblue1")) +
+  theme_minimal() +
+  labs(x = "", y = "", title = "Online applications for morgage at different times of the year",
+       fill = "Season") +
+  theme(plot.title = element_text(size = 10),  # Уменьшаем размер заголовка
+        legend.title = element_text(size = 8), # Уменьшаем размер легенды
+        legend.text = element_text(size = 8))
+
+
+```
+
+
+
+People's inclination towards online banking does not depend on the time of year.
+
+```{r cor4, warning=FALSE, message=FALSE, echo=FALSE}
+cor.test(top_only$online.loan.applications.share, as.numeric(top_only$Season), method = "spearman")
+# 0.22 - слабая положительная корреляция, т.е. возможно люди чаще берут кредит ближе к концу года
+# p-value = 0.1276 - не считаем 
+```
+
+
+
+***Insights from Visual Analysis***
+
+Visual analysis of mortgage transactions indicates a prevalent trend towards acquiring secondary housing during the winter and spring months. This observation is substantiated by a weak negative correlation, with a Spearman coefficient of -0.315, suggesting an increased incidence of secondary housing transactions at the onset of the year.
+
+```{r 11-12. ggplot secondary mortgage by season, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+##### 11.12. Ипотека на вторичное жилье в разное время года ##### 
+
+ggplot(top_only, aes(x = Season, y = already.owned.share, fill = Season)) + 
+  geom_boxplot() +
+  scale_fill_manual(values = c("Spring" = "lightpink", "Summer" = "chartreuse3", "Autumn" = "darkorange", "Winter" = "lightsteelblue1")) +
+  theme_minimal() +
+  labs(x = "", y = "", title = "Shares of transactions in secondary mortgage market at different times of the year",
+       fill = "Season")
+  theme(plot.title = element_text(size = 10),  
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8)) 
+
+# вторичку берут чаще зимой или весной
+
+```
+
+
+```{r cor5, warning=FALSE, message=FALSE, echo=FALSE}
+cor.test(top_only$already.owned.share, as.numeric(top_only$Season), method = "spearman")
+```
+
+
+***Potential Explanation for Seasonal Trends***
+
+The observed surge in secondary mortgage transactions during the winter and spring months may be attributed to following factor: 
+
+the slower pace of new home construction during colder seasons could limit the availability of newly-built properties, consequently driving up demand for existing secondary housing options. This phenomenon reflects a scenario where reduced supply intersects with sustained demand, prompting individuals to turn to the secondary housing market for viable options.
+
+### Regression analysis 
+
+```{r dataset preparation, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+data <- read.csv("All_data_eng.csv", stringsAsFactors = FALSE)  # just in case
+data$Region <- iconv(data$Region, to = "UTF-8")  # just in case
+
+data <- data[, -1]
+
+
+# добавить сезон
+data <- data %>%
+  mutate(Season = case_when(
+    Month %in% c("January", "February", "December") ~ "Winter",
+    Month %in% c("April", "May", "March") ~ "Spring",
+    Month %in% c("June", "July", "August") ~ "Summer",
+    Month %in% c("September", "October", "November") ~ "Autumn"
+  ))
+
+
+top_only <- data %>% filter(Region %in% c("Kirov Oblast", "Kaliningrad Oblast", "Kamchatka Krai" , "Nizhny Novgorod Oblast"))
+
+
+data$Season <- as.factor(data$Season)
+data$Season <- relevel(data$Season, ref = "Winter")
+```
+
+
+
+```{r model1, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+# Каким образом потребительская активность зависит от средней заработной платы в регионе, числа активных абонентов беспроводного наземного фиксированного доступа к сети Интернет и уровня безработицы населения?
+colnames(data)
+
+# сначала уберу все NA для этих переменных
+
+data_for_mod1 <- data %>% select(activity, average.wage, internet.users, unemployment.rate, Season)  %>% filter(complete.cases(.))
+
+
+
+
+mod1 <- lm(data = data_for_mod1, activity ~ average.wage + internet.users + unemployment.rate + Season)
+
+summary(mod1)
+# Adjusted R-squared:  0.02682 - выбранные переменные никак не объясняют вариации в потребильской активности, нет смысла анализировать коэффициенты (коэф тоже микро), p-value значительный
+
+```
+
+
+
+
+
+
+```{r mod1 quality, warning=FALSE, message=FALSE, echo=FALSE, results='hide', fig.show='hide'}
+
+# мультиколлинеарность
+check1 <- data_for_mod1[ ,c(2:4)]
+cor(check1) # нет очень высоких коэффициентов 
+
+data_for_mod1$fitted <- mod1$fitted.values
+data_for_mod1$residuals <- mod1$residuals
+
+
+ggplot(data = data_for_mod1, aes(x = fitted, y = residuals)) + geom_point() + 
+  geom_hline(yintercept = 0, color = "red")
+# есть концентрация в центре, есть гетероскедастичность
+
+plot(mod1,5) # особо влиятельных наблюдений нет
+
+
+
+
+# так как есть некоторая гетероскедастичность, делаю HC0 - тип оценки ошибок, который устойчив к гетероскедастичности
+coeftest(mod1, vcov = vcovHC(mod1, type = "HC0"))
+# но по факту ничего не меняется
+
+
+# если убрать незначимый регрессор, ничего особо не поменяется
+mod1_2 <- lm(data = data_for_mod1, activity ~ internet.users + unemployment.rate + Season)
+
+summary(mod1_2)
+
+```
+
+
+
+
+
+```{r model2, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+# Каким образом доля безналичных платежей в торговом обороте зависит от средней заработной платы в регионе, числа активных абонентов беспроводного наземного фиксированного доступа к сети Интернет и уровня безработицы населения?
+
+# сначала уберу все NA для этих переменных
+data_for_mod2 <- data %>% select(transactions, average.wage, internet.users, unemployment.rate, Season)  %>% filter(complete.cases(.))
+
+mod2 <- lm(data = data_for_mod2, transactions ~ average.wage + internet.users + unemployment.rate + Season)
+
+summary(mod2)
+
+# модель значимая, R-squared = 0.55. 
+
+# при увеличении заработной платы на 1 рубль, доля БП увеличиться на 1.291e-04 
+# при увеличении уровня безработицы на 1%, доля БП. уменьшится на 1.305
+
+# при увеличении числа активных абонентов, доля БП уменьшится на 6.589e-05 (по идее абоненты интернета и бп должны быть связаны, но так как такая взаимосвязь пускай и микроскопическая не подходит под логику, я сочту что p-value = 0.0565 все-таки не значимый для нас)
+
+```
+
+
+```{r mod2 quality, warning=FALSE, message=FALSE, echo=FALSE, results='hide', fig.show='hide'}
+
+# мультиколлинеарность
+check2 <- data_for_mod2[ ,c(2:4)]
+cor(check2) # нет очень высоких коэффициентов 
+
+
+# гетероскедастичность 
+data_for_mod2$fitted <- mod2$fitted.values
+data_for_mod2$residuals <- mod2$residuals
+
+ggplot(data = data_for_mod2, aes(x = fitted, y = residuals)) + geom_point() + 
+  geom_hline(yintercept = 0, color = "red")
+# есть явная гетероскедастичность
+
+plot(mod2,5) # особо влиятельных наблюдений нет
+
+# так как есть гетероскедастичность, делаю HC0 - тип оценки ошибок, который устойчив к гетероскедастичности
+coeftest(mod2, vcov = vcovHC(mod1, type = "HC0"))
+# Число.активных.абонентов.доступа.к.интернету стало совсем не значительным, поэтому исключу этот регрессор из модели
+
+mod2_2 <- lm(data = data_for_mod2, transactions ~ average.wage + unemployment.rate + Season)
+
+summary(mod2_2)
+
+# модель значимая, R-squared = 0.55. 
+
+# при увеличении заработной платы на 1 рубль, доля БП увеличиться на 1.248e-04 
+# при увеличении уровня безработицы на 1%, доля БП. уменьшится на 1.297
+# - коэффициенты чуть-чуть уменьшились
+
+```
+
+
+```{r binary variables (2.3), warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+# столбец, состоящий из 0 и 1, где 1 означает, что доля онлайн-заявок на кредит превышает долю заявок в офисе банка
+
+data <- data %>% mutate(online_propensity = ifelse(data$online.loan.applications.share > data$offline.loan.applications.share,1,0))
+
+# столбец, состоящий из 0 и 1, где 1 соответствует регионам с числом ипотечных сделок больше 500
+
+data$mortgage.deals <- factor(data$mortgage.deals,
+                                          levels = c("10 - 50", "50 - 100", "100 - 500", "500 - 1 000", "> 1 000"),
+                                          ordered = TRUE)
+
+data <- data %>% mutate(mortgage_propensity = ifelse(mortgage.deals > "100 - 500", 1, 0))
+
+```
+
+
+```{r model3, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+# Каким образом склонность населения предпочитать онлайн-услуги банка зависит от средней заработной платы в регионе, числа активных абонентов беспроводного наземного фиксированного доступа к сети Интернет и уровня безработицы населения?
+
+data_for_mod3 <- data %>% select(online_propensity, average.wage, internet.users, unemployment.rate, Season) %>% filter(complete.cases(.))
+
+
+logit1 <- glm(data = data_for_mod3, online_propensity ~ average.wage + internet.users + unemployment.rate + Season, family = "binomial")
+
+summary(logit1)
+
+```
+
+
+```{r OR3, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+#odds ratio
+exp(coef(logit1))
+# влияние доступа к интернету и средней заработной платы положительное, но очень маленькое, можно пренебречь
+# влияние безработицы более существенно: при увеличении уровня безработицы в регионе на 1%, шанс предпочтения онлайн-банка возрастают в 1.2 раза
+```
+
+
+```{r logit1 ROC, warning=FALSE, message=FALSE, echo=FALSE, results='hide', fig.show='hide'}
+
+roc1 <- roc(data_for_mod3$online_propensity ~ logit1$fitted.values)
+roc1
+plot(roc1)
+text(x = 1, y = 0.8, "AUC = 0.85") #ближе к 1 чем к 0.5, ок
+
+```
+
+
+```{r logit1 matrix, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+# CONFUSION MATRIX
+
+data_for_mod3$predict_online <- predict(logit1, data_for_mod3, type = "response")
+
+# вместо порога классификации 0.5 беру медиану предсказанную вероятность, так как все предсказанные значения маленькие
+
+threshold <- median(data_for_mod3$predict_online)
+predicted_binary1 <- ifelse(data_for_mod3$predict_online >= threshold, 1, 0)
+
+conf_matrix1 <- confusionMatrix(factor(predicted_binary1), factor(data_for_mod3$online_propensity))
+
+```
+
+
+```{r model4, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+# Каким образом склонность населения оформлять ипотеку зависит от средней заработной платы в регионе, числа активных абонентов беспроводного наземного фиксированного доступа к сети Интернет и уровня безработицы населения?
+
+data_for_mod4 <- data %>% select(mortgage_propensity, average.wage, internet.users, unemployment.rate, Season) %>% filter(complete.cases(.))
+
+logit2 <- glm(data = data_for_mod4, mortgage_propensity ~ average.wage + internet.users + unemployment.rate + Season, family = "binomial")
+
+summary(logit2)
+
+```
+
+
+```{r OR4, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+exp(coef(logit2))
+# влияние доступа к интернету и средней заработной платы положительное и отрицательное, соответственно, но очень маленькое, можно пренебречь
+
+# влияние уровня безработицы более заметно: при увеличении уровня безработицы на 1%, шансы заявки на ипотеку уменьшались в 1/0.82 = 1.22 раза.
+
+```
+
+
+```{r logit2 ROC, warning=FALSE, message=FALSE, echo=FALSE, results='hide', fig.show='hide'}
+
+roc2 <- roc(data_for_mod4$mortgage_propensity ~ logit2$fitted.values)
+roc2
+plot(roc2)
+text(x = 1, y = 0.8, "AUC = 0.77") #ближе к 1 чем к 0.5, ок
+
+```
+
+
+```{r logit2 confusion matrix, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+
+# CONFUSION MATRIX
+
+data_for_mod4$predict_mortgage <- predict(logit2, data_for_mod4, type = "response")
+
+# вместо порога классификации 0.5 беру медиану предсказанную вероятность, так как все предсказанные значения маленькие
+
+threshold2 <- median(data_for_mod4$predict_mortgage)
+predicted_binary2 <- ifelse(data_for_mod4$predict_mortgage >= threshold, 1, 0)
+
+
+conf_matrix2 <- confusionMatrix(factor(predicted_binary2), factor(data_for_mod4$mortgage_propensity))
+conf_matrix2
+
+# Sensitivity : 0.06702        
+# Specificity : 1.000000 
+# Balanced Accuracy : 0.53351
+```
+
+
+When assessing the dependence of consumer activity and the share of non-cash payments on the average salary in the region, the number of active subscribers of wireless terrestrial fixed access to the Internet and the unemployment rate of the population, the following regression equations were obtained, respectively:
+
+Y(activity) = 67.9 + 0.0001X(internet) - 0.486X(unempl) - 8.291I(spring) + 5.146I(summer) + 5.083I(aut)
+
+Y(onl.trans) = 53.8 + 0.0001X(wage) - 1.313Х(unempl)  + 1.046I(summer) + 3.157I(aut)
+
+For consumer economic activity:
+
+1. About 41% of the changes in consumer activity can be explained by these factors.
+2. More internet users slightly increase consumer activity (by 0.0001 units for each additional user).
+3. A 1% rise in unemployment decreases consumer activity by 0.486 units.
+4. Compared to winter, consumer activity drops significantly in spring (by 8.291 units) but increases in summer and autumn (by 5.146 and 5.083 units, respectively).
+
+For online payments:
+
+1. These factors explain around 55% of the variations in non-cash payments.
+2. A 1 ruble increase in average salary slightly boosts the use of non-cash payments (by 0.0001%).
+3. A 1% higher unemployment rate reduces the use of non-cash payments by 1.313%.
+4. The use of non-cash payments is notably higher in summer and autumn (by 1.046 and 3.157 units, respectively) compared to winter, with no significant change from winter to spring.
+
+
+```{r stargazer for linear, warning=FALSE, message=FALSE, echo=FALSE}
+
+stargazer(mod1_2, mod2_2, type = "text",
+          title = "Linear Regression Results",
+          omit.stat = c("ser", "f"),
+          column.sep.width = "-30pt",
+          scale = 0.75)
+
+```
+
+People's preference for online banking and taking out mortgages is slightly influenced by the region's average salary, internet subscribers, and unemployment rate. 
+
+z(online) = -7.60 + 0.0001X(wage) + 0.00004Х(internet) + 0.193Х(unempl) + 1.532I(spring) + 0.998I(aut)
+
+z(mortgage) = 1.423 - 0.00001X(wage) + 0.0004Х(internet) - 0.256Х(unempl) + 0.827I(summer) + 1.829I(aut)
+
+1. Both online banking and mortgages are a bit more common with higher salaries and more internet users, but the impact is small.
+2. Unemployment has a bigger effect: a 1% higher unemployment rate means people are about 1.21 times more likely to use online banking. For mortgages, a 1% increase in unemployment makes people 1.29 times less likely to get one.
+3. Season matters too: people use online banking more in spring and autumn, and are more likely to take out mortgages in summer and autumn, compared to winter 2020.
+  
+
+```{r stargazer for logit, warning=FALSE, message=FALSE, echo=FALSE}
+
+
+stargazer(logit1,logit2, type = "text",
+          title = "Logistic Regression Results",
+          column.sep.width = "-30pt",
+          scale = 0.75)
+```
+
+
+
+
+
+### Dashboard - Indicators
+
+
+
+```{r, echo=FALSE}
+shinyAppDir(
+  appDir = "/Users/viktoriazajceva/Desktop/R/20 Проект/FINAL/shiny indicators", # Replace with the path to your Shiny app directory
+  options = list(
+    width = "100%", # Adjust width as needed
+    height = 700 # Adjust height as needed
+  )
+)
+
+
+```
+
+
+
+
+### Dashboard - Map of Russia
+
+
+```{r map code, warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+library(tidyverse)
+library(geojsonio)
+library(leaflet)
+library(RColorBrewer)
+
+
+# здесь работаю с датасетом, где на англ переведены только столбцы, так как гео данные на русском и неохота чекать названия регионов
+
+all_data_eng <- read.csv("/Users/viktoriazajceva/Desktop/R/20 Проект/FINAL/shiny indicators/All_data_eng_columns.csv")
+all_data_eng <- all_data_eng[,-1]
+
+##### map ####
+rus <- geojson_read('/Users/viktoriazajceva/Desktop/R/20 Проект/FINAL/shiny indicators/russia.geojson', what = 'sp')
+class(rus)
+
+# Добавим к каждому региону вектор из случайных чисел (num)
+set.seed(777)
+rus@data <- mutate(rus@data, num = rnorm(n = 83, mean = 100, sd = 30)) 
+
+# Укажем цвет для каждого региона и подпись, которая будет появляться при наведении мышкой:
+
+pal <- colorNumeric('BuPu', NULL) # задаём палитру цветов
+
+
+##### Chukotka correction ####
+chukotka <- rus@polygons[[18]]
+for (i in 1:length(chukotka@Polygons)) {
+  polygon_long <- chukotka@Polygons[[i]]@coords[, 1]
+  if (mean(polygon_long) < 0) {
+    polygon_long <- 360 + polygon_long
+  }
+  chukotka@Polygons[[i]]@coords[, 1] <- polygon_long
+}
+
+rus_corrected <- rus
+rus_corrected@polygons[[18]] <- chukotka
+
+
+##### map_data ####
+map_data <- all_data_eng[,c(1,3,5,6,8,9)]
+
+
+map_data <- map_data %>% group_by(Region) %>% summarise(transactions_av = mean(transactions),
+                                            activity_av = mean(activity),
+                                            wage = mean(average.wage),
+                                            unemployment = mean(unemployment.rate))
+
+
+map_names <- unique(rus_corrected@data$name) #83
+data_names <- unique(map_data$Region) #83
+
+
+for (i in map_names){
+  if (!(i %in% data_names)) {
+    print(i)
+  }
+}
+
+
+sorted_map_names <- sort(map_names)
+sorted_data_names <- sort(data_names)
+
+for_checking <- data.frame(Map_Names = sorted_map_names, Data_Names = sorted_data_names)
+
+# переименовываю, чтобы было названия в датасетах полностью совпадали 
+map_data <- map_data %>%
+  mutate(Region = case_when(
+    Region == "Республика Адыгея" ~ "Адыгея", 
+    Region == "Республика Алтай" ~ "Алтай", 
+    Region == "Республика Ингушетия" ~ "Ингушетия",
+    Region == "Республика Бурятия" ~ "Бурятия",
+    Region == "Республика Башкортостан" ~ "Башкортостан",
+    Region == "Республика Дагестан" ~ "Дагестан",
+    Region == "Республика Марий Эл" ~ "Марий Эл",
+    Region == "Республика Татарстан" ~ "Татарстан",
+    Region == "Республика Тыва" ~ "Тыва",
+    Region == "Мордовия" ~ "Республика Мордовия",
+    Region == "Республика Карачаево-Черкессия" ~ "Карачаево-Черкесская республика",
+    Region == "Республика Северная Осетия - Алания" ~ "Северная Осетия - Алания",
+    Region == "Чувашская Республика" ~ "Чувашия",
+    TRUE ~ Region
+  ))
+
+
+
+
+rus_corrected@data$name <- tolower(rus@data$name)
+map_data$Region <- tolower(map_data$Region)
+
+# Left join map_data with rus
+merged_data <- left_join(rus_corrected@data, map_data, by = c("name" = "Region"))
+
+
+library(viridis)
+# количество цветов в палитре 
+num_colors <- 83  
+
+# Define color palette
+pal <- colorNumeric(viridis(num_colors), merged_data$transactions_av)
+# Assign colors and labels
+merged_data <- mutate(merged_data, 
+                      reg_color = pal(transactions_av),
+                      reg_label = paste0(name, ': ', formatC(transactions_av, digits = 2)))
+
+
+
+# Создаю leaflet map
+rus_polygons <- sp::SpatialPolygonsDataFrame(rus_corrected, merged_data)
+
+# переименовываю
+variable_names <- c(transactions_av = "Online Transactions",
+                    activity_av = "Economic Activity",
+                    wage = "Average Wage",
+                    unemployment = "Unemployment Rate")
+
+
+rus_polygons %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons(stroke = FALSE, fillColor = ~reg_color, label = ~reg_label, group = "Regions") %>%
+  addLegend(pal = pal, values = ~transactions_av, title = 'Number of transactions')  %>%
+  setView(lng = 100, lat = 66, zoom = 2)
+
+
+
+```
+
+
+```{r map shiny, warning=FALSE, message=FALSE, echo=FALSE}
+
+library(shinyWidgets)
+library(leaflet)
+library(viridis)
+# Assuming 'merged_data' and 'rus_corrected' are already defined and available
+
+# UI definition
+ui <- fluidPage(
+  titlePanel("Map of Russia"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("variable", "Select Variable to Visualise:",
+                  choices = c("Online Transactions" = "transactions_av", 
+                              "Economic Activity" = "activity_av", 
+                              "Average Wage" = "wage", 
+                              "Unemployment Rate" = "unemployment"),
+                  selected = "transactions_av"),
+      pickerInput("palette", "Select Color Palette:",
+                  choices = c("Cool Blues" = "Viridis", "Green to Blue" = "YlGnBu", "Sunset" = "RdYlBu", "Lavender Tones" = "BuPu"),
+                  selected = "Viridis",
+                  options = list(`style` = "btn-default"))
+    ),
+    mainPanel(
+      leafletOutput("map")
+    )
+  )
+)
+
+
+server <- function(input, output, session) {
+  
+  # Reactive expression to update the map
+  reactive_map <- reactive({
+    # Define color palette
+    pal <- switch(input$palette,
+                  "Viridis" = colorNumeric(viridis(10), merged_data[[input$variable]]),
+                  "YlGnBu" = colorNumeric('YlGnBu', merged_data[[input$variable]]),
+                  "RdYlBu" = colorNumeric('RdYlBu', merged_data[[input$variable]]),
+                  "BuPu" = colorNumeric('BuPu', merged_data[[input$variable]]))
+    
+    # Assign colors and labels
+    merged_data <- merged_data %>%
+      mutate(reg_color = pal(!!sym(input$variable)),
+             reg_label = paste0(name, ': ', formatC(!!sym(input$variable)), digits = 2))
+    
+    # Create leaflet map
+    rus_polygons <- sp::SpatialPolygonsDataFrame(rus_corrected, merged_data)
+    
+    rus_polygons %>%
+      leaflet() %>%
+      addTiles() %>%
+      addPolygons(stroke = FALSE, fillColor = ~reg_color, label = ~reg_label, group = "Regions") %>%
+      addLegend(pal = pal, values = merged_data[[input$variable]], title = input$variable) %>%
+      setView(lng = 100, lat = 66, zoom = 2)
+  })
+  
+  # Render the map
+  output$map <- renderLeaflet({
+    reactive_map()
+  })
+}
+
+# Run the Shiny app inline
+shinyApp(ui = ui, server = server)
+```
+
+
+
+
